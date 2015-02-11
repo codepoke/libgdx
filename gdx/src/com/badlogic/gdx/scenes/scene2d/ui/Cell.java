@@ -886,6 +886,7 @@ public class Cell<T extends Actor> implements Poolable {
 		table = null;
 		endRow = false;
 		cellAboveIndex = -1;
+		defaults();
 	}
 
 	/** Set all constraints to cell default values. */
