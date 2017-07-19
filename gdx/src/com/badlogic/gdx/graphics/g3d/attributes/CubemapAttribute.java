@@ -17,18 +17,13 @@
 package com.badlogic.gdx.graphics.g3d.attributes;
 
 import com.badlogic.gdx.graphics.Cubemap;
-import com.badlogic.gdx.graphics.Texture;
 import com.badlogic.gdx.graphics.g3d.Attribute;
 import com.badlogic.gdx.graphics.g3d.utils.TextureDescriptor;
 import com.badlogic.gdx.utils.GdxRuntimeException;
 
 public class CubemapAttribute extends Attribute {
-	public final static String EnvironmentMapAlias = "environmentMapTexture";
+	public final static String EnvironmentMapAlias = "environmentCubemap";
 	public final static long EnvironmentMap = register(EnvironmentMapAlias);
-
-	// FIXME add more types!
-	// FIXME add scaling + offset?
-	// FIXME add filter settings? MipMap needs to be obeyed during loading :/
 
 	protected static long Mask = EnvironmentMap;
 
@@ -64,7 +59,15 @@ public class CubemapAttribute extends Attribute {
 	}
 
 	@Override
-	protected boolean equals (Attribute other) {
-		return ((CubemapAttribute)other).textureDescription.equals(textureDescription);
+	public int hashCode () {
+		int result = super.hashCode();
+		result = 967 * result + textureDescription.hashCode();
+		return result;
+	}
+	
+	@Override
+	public int compareTo (Attribute o) {
+		if (type != o.type) return (int)(type - o.type);
+		return textureDescription.compareTo(((CubemapAttribute)o).textureDescription);
 	}
 }

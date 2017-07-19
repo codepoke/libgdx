@@ -29,6 +29,7 @@ import com.badlogic.gdx.maps.MapLayer;
 import com.badlogic.gdx.maps.MapLayers;
 import com.badlogic.gdx.maps.MapObject;
 import com.badlogic.gdx.maps.tiled.TiledMap;
+import com.badlogic.gdx.maps.tiled.TiledMapImageLayer;
 import com.badlogic.gdx.maps.tiled.TiledMapRenderer;
 import com.badlogic.gdx.maps.tiled.TiledMapTile;
 import com.badlogic.gdx.maps.tiled.TiledMapTileLayer;
@@ -46,9 +47,11 @@ import com.badlogic.gdx.utils.Disposable;
  * @author Nathan Sweet */
 public class OrthoCachedTiledMapRenderer implements TiledMapRenderer, Disposable {
 	static private final float tolerance = 0.00001f;
+	static protected final int NUM_VERTICES = 20;
 
 	protected final TiledMap map;
 	protected final SpriteCache spriteCache;
+
 	protected final float[] vertices = new float[20];
 	protected boolean blending;
 
@@ -127,6 +130,8 @@ public class OrthoCachedTiledMapRenderer implements TiledMapRenderer, Disposable
 				spriteCache.beginCache();
 				if (layer instanceof TiledMapTileLayer) {
 					renderTileLayer((TiledMapTileLayer)layer);
+				} else if (layer instanceof TiledMapImageLayer) {
+					renderImageLayer((TiledMapImageLayer)layer);
 				}
 				spriteCache.endCache();
 			}
@@ -142,9 +147,7 @@ public class OrthoCachedTiledMapRenderer implements TiledMapRenderer, Disposable
 			MapLayer layer = mapLayers.get(i);
 			if (layer.isVisible()) {
 				spriteCache.draw(i);
-				for (MapObject object : layer.getObjects()) {
-					renderObject(object);
-				}
+				renderObjects(layer);
 			}
 		}
 		spriteCache.end();
@@ -169,6 +172,8 @@ public class OrthoCachedTiledMapRenderer implements TiledMapRenderer, Disposable
 				spriteCache.beginCache();
 				if (layer instanceof TiledMapTileLayer) {
 					renderTileLayer((TiledMapTileLayer)layer);
+				} else if (layer instanceof TiledMapImageLayer) {
+					renderImageLayer((TiledMapImageLayer)layer);
 				}
 				spriteCache.endCache();
 			}
@@ -184,13 +189,18 @@ public class OrthoCachedTiledMapRenderer implements TiledMapRenderer, Disposable
 			MapLayer layer = mapLayers.get(i);
 			if (layer.isVisible()) {
 				spriteCache.draw(i);
-				for (MapObject object : layer.getObjects()) {
-					renderObject(object);
-				}
+				renderObjects(layer);
 			}
 		}
 		spriteCache.end();
 		if (blending) Gdx.gl.glDisable(GL20.GL_BLEND);
+	}
+
+	@Override
+	public void renderObjects (MapLayer layer) {
+		for (MapObject object : layer.getObjects()) {
+			renderObject(object);
+		}
 	}
 
 	@Override
@@ -207,11 +217,17 @@ public class OrthoCachedTiledMapRenderer implements TiledMapRenderer, Disposable
 		final float layerTileWidth = layer.getTileWidth() * unitScale;
 		final float layerTileHeight = layer.getTileHeight() * unitScale;
 
-		final int col1 = Math.max(0, (int)(cacheBounds.x / layerTileWidth));
-		final int col2 = Math.min(layerWidth, (int)((cacheBounds.x + cacheBounds.width + layerTileWidth) / layerTileWidth));
+		final float layerOffsetX = layer.getOffsetX() * unitScale;
+		// offset in tiled is y down, so we flip it
+		final float layerOffsetY = -layer.getOffsetY() * unitScale;
 
-		final int row1 = Math.max(0, (int)(cacheBounds.y / layerTileHeight));
-		final int row2 = Math.min(layerHeight, (int)((cacheBounds.y + cacheBounds.height + layerTileHeight) / layerTileHeight));
+		final int col1 = Math.max(0, (int)((cacheBounds.x - layerOffsetX) / layerTileWidth));
+		final int col2 = Math.min(layerWidth,
+			(int)((cacheBounds.x + cacheBounds.width + layerTileWidth - layerOffsetX) / layerTileWidth));
+
+		final int row1 = Math.max(0, (int)((cacheBounds.y - layerOffsetY) / layerTileHeight));
+		final int row2 = Math.min(layerHeight,
+			(int)((cacheBounds.y + cacheBounds.height + layerTileHeight - layerOffsetY) / layerTileHeight));
 
 		canCacheMoreN = row2 < layerHeight;
 		canCacheMoreE = col2 < layerWidth;
@@ -219,7 +235,7 @@ public class OrthoCachedTiledMapRenderer implements TiledMapRenderer, Disposable
 		canCacheMoreS = row1 > 0;
 
 		float[] vertices = this.vertices;
-		for (int row = row1; row < row2; row++) {
+		for (int row = row2; row >= row1; row--) {
 			for (int col = col1; col < col2; col++) {
 				final TiledMapTileLayer.Cell cell = layer.getCell(col, row);
 				if (cell == null) continue;
@@ -235,8 +251,8 @@ public class OrthoCachedTiledMapRenderer implements TiledMapRenderer, Disposable
 				final TextureRegion region = tile.getTextureRegion();
 				final Texture texture = region.getTexture();
 
-				final float x1 = col * layerTileWidth;
-				final float y1 = row * layerTileHeight;
+				final float x1 = col * layerTileWidth + tile.getOffsetX() * unitScale + layerOffsetX;
+				final float y1 = row * layerTileHeight + tile.getOffsetY() * unitScale + layerOffsetY;
 				final float x2 = x1 + region.getRegionWidth() * unitScale;
 				final float y2 = y1 + region.getRegionHeight() * unitScale;
 
@@ -334,9 +350,59 @@ public class OrthoCachedTiledMapRenderer implements TiledMapRenderer, Disposable
 					}
 					}
 				}
-				spriteCache.add(texture, vertices, 0, 20);
+				spriteCache.add(texture, vertices, 0, NUM_VERTICES);
 			}
 		}
+	}
+
+	@Override
+	public void renderImageLayer (TiledMapImageLayer layer) {
+		final float color = Color.toFloatBits(1.0f, 1.0f, 1.0f, layer.getOpacity());
+		final float[] vertices = this.vertices;
+
+		TextureRegion region = layer.getTextureRegion();
+
+		if (region == null) {
+			return;
+		}
+
+		final float x = layer.getX();
+		final float y = layer.getY();
+		final float x1 = x * unitScale;
+		final float y1 = y * unitScale;
+		final float x2 = x1 + region.getRegionWidth() * unitScale;
+		final float y2 = y1 + region.getRegionHeight() * unitScale;
+
+		final float u1 = region.getU();
+		final float v1 = region.getV2();
+		final float u2 = region.getU2();
+		final float v2 = region.getV();
+
+		vertices[X1] = x1;
+		vertices[Y1] = y1;
+		vertices[C1] = color;
+		vertices[U1] = u1;
+		vertices[V1] = v1;
+
+		vertices[X2] = x1;
+		vertices[Y2] = y2;
+		vertices[C2] = color;
+		vertices[U2] = u1;
+		vertices[V2] = v2;
+
+		vertices[X3] = x2;
+		vertices[Y3] = y2;
+		vertices[C3] = color;
+		vertices[U3] = u2;
+		vertices[V3] = v2;
+
+		vertices[X4] = x2;
+		vertices[Y4] = y1;
+		vertices[C4] = color;
+		vertices[U4] = u2;
+		vertices[V4] = v1;
+
+		spriteCache.add(region.getTexture(), vertices, 0, NUM_VERTICES);
 	}
 
 	/** Causes the cache to be rebuilt the next time it is rendered. */

@@ -16,20 +16,25 @@
 
 package com.badlogic.gdx.scenes.scene2d.ui;
 
+import com.badlogic.gdx.Input.Keys;
 import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.g2d.Batch;
 import com.badlogic.gdx.graphics.g2d.BitmapFont;
-import com.badlogic.gdx.graphics.g2d.BitmapFont.TextBounds;
+import com.badlogic.gdx.graphics.g2d.GlyphLayout;
 import com.badlogic.gdx.math.Rectangle;
+import com.badlogic.gdx.scenes.scene2d.Actor;
 import com.badlogic.gdx.scenes.scene2d.InputEvent;
 import com.badlogic.gdx.scenes.scene2d.InputListener;
 import com.badlogic.gdx.scenes.scene2d.utils.ArraySelection;
 import com.badlogic.gdx.scenes.scene2d.utils.ChangeListener.ChangeEvent;
 import com.badlogic.gdx.scenes.scene2d.utils.Cullable;
 import com.badlogic.gdx.scenes.scene2d.utils.Drawable;
-import com.badlogic.gdx.scenes.scene2d.utils.ArraySelection;
+import com.badlogic.gdx.utils.Align;
+import com.badlogic.gdx.scenes.scene2d.utils.UIUtils;
 import com.badlogic.gdx.utils.Array;
 import com.badlogic.gdx.utils.ObjectSet;
+import com.badlogic.gdx.utils.Pool;
+import com.badlogic.gdx.utils.Pools;
 
 /** A list (aka list box) displays textual items and highlights the currently selected item.
  * <p>
@@ -39,13 +44,14 @@ import com.badlogic.gdx.utils.ObjectSet;
  * @author mzechner
  * @author Nathan Sweet */
 public class List<T> extends Widget implements Cullable {
-	private ListStyle style;
-	private final Array<T> items = new Array();
+	ListStyle style;
+	final Array<T> items = new Array();
+	final ArraySelection<T> selection = new ArraySelection(items);
 	private Rectangle cullingArea;
 	private float prefWidth, prefHeight;
-	private float itemHeight;
-	private float textOffsetX, textOffsetY;
-	final ArraySelection<T> selection;
+	float itemHeight;
+	private int alignment = Align.left;
+	int touchDown;
 
 	public List (Skin skin) {
 		this(skin.get(ListStyle.class));
@@ -56,7 +62,6 @@ public class List<T> extends Widget implements Cullable {
 	}
 
 	public List (ListStyle style) {
-		selection = new ArraySelection(items);
 		selection.setActor(this);
 		selection.setRequired(true);
 
@@ -64,26 +69,44 @@ public class List<T> extends Widget implements Cullable {
 		setSize(getPrefWidth(), getPrefHeight());
 
 		addListener(new InputListener() {
+			public boolean keyDown (InputEvent event, int keycode) {
+				if (keycode == Keys.A && UIUtils.ctrl() && selection.getMultiple()) {
+					selection.clear();
+					selection.addAll(items);
+					return true;
+				}
+				return false;
+			}
+
 			public boolean touchDown (InputEvent event, float x, float y, int pointer, int button) {
-				if (pointer == 0 && button != 0) return false;
+				if (pointer != 0 || button != 0) return false;
 				if (selection.isDisabled()) return false;
-				List.this.touchDown(y);
+				if (selection.getMultiple()) getStage().setKeyboardFocus(List.this);
+				if (items.size == 0) return false;
+				float height = getHeight();
+				Drawable background = List.this.style.background;
+				if (background != null) {
+					height -= background.getTopHeight() + background.getBottomHeight();
+					y -= background.getBottomHeight();
+				}
+				int index = (int)((height - y) / itemHeight);
+				if (index > items.size - 1) return false;
+				index = Math.max(0, index);
+				selection.choose(items.get(index));
+				touchDown = index;
 				return true;
 			}
-		});
-	}
 
-	void touchDown (float y) {
-		if (items.size == 0) return;
-		float height = getHeight();
-		if (style.background != null) {
-			height -= style.background.getTopHeight() + style.background.getBottomHeight();
-			y -= style.background.getBottomHeight();
-		}
-		int index = (int)((height - y) / itemHeight);
-		index = Math.max(0, index);
-		index = Math.min(items.size - 1, index);
-		selection.choose(items.get(index));
+			public void touchUp (InputEvent event, float x, float y, int pointer, int button) {
+				if (pointer != 0 || button != 0) return;
+				touchDown = -1;
+			}
+
+			public void exit (InputEvent event, float x, float y, int pointer, Actor toActor) {
+				if (pointer != 0) return;
+				touchDown = -1;
+			}
+		});
 	}
 
 	public void setStyle (ListStyle style) {
@@ -92,26 +115,27 @@ public class List<T> extends Widget implements Cullable {
 		invalidateHierarchy();
 	}
 
-	/** Returns the list's style. Modifying the returned style may not have an effect until {@link #setStyle(ListStyle)} is called. */
+	/** Returns the list's style. Modifying the returned style may not have an effect until {@link #setStyle(ListStyle)} is
+	 * called. */
 	public ListStyle getStyle () {
 		return style;
 	}
 
 	public void layout () {
-		final BitmapFont font = style.font;
-		final Drawable selectedDrawable = style.selection;
+		BitmapFont font = style.font;
+		Drawable selectedDrawable = style.selection;
 
 		itemHeight = font.getCapHeight() - font.getDescent() * 2;
 		itemHeight += selectedDrawable.getTopHeight() + selectedDrawable.getBottomHeight();
 
-		textOffsetX = selectedDrawable.getLeftWidth();
-		textOffsetY = selectedDrawable.getTopHeight() - font.getDescent();
-
 		prefWidth = 0;
+		Pool<GlyphLayout> layoutPool = Pools.get(GlyphLayout.class);
+		GlyphLayout layout = layoutPool.obtain();
 		for (int i = 0; i < items.size; i++) {
-			TextBounds bounds = font.getBounds(items.get(i).toString());
-			prefWidth = Math.max(bounds.width, prefWidth);
+			layout.setText(font, toString(items.get(i)));
+			prefWidth = Math.max(layout.width, prefWidth);
 		}
+		layoutPool.free(layout);
 		prefWidth += selectedDrawable.getLeftWidth() + selectedDrawable.getRightWidth();
 		prefHeight = items.size * itemHeight;
 
@@ -146,25 +170,35 @@ public class List<T> extends Widget implements Cullable {
 			width -= leftWidth + background.getRightWidth();
 		}
 
+		float textOffsetX = selectedDrawable.getLeftWidth(), textWidth = width - textOffsetX - selectedDrawable.getRightWidth();
+		float textOffsetY = selectedDrawable.getTopHeight() - font.getDescent();
+
 		font.setColor(fontColorUnselected.r, fontColorUnselected.g, fontColorUnselected.b, fontColorUnselected.a * parentAlpha);
 		for (int i = 0; i < items.size; i++) {
 			if (cullingArea == null || (itemY - itemHeight <= cullingArea.y + cullingArea.height && itemY >= cullingArea.y)) {
 				T item = items.get(i);
 				boolean selected = selection.contains(item);
 				if (selected) {
-					selectedDrawable.draw(batch, x, y + itemY - itemHeight, width, itemHeight);
+					Drawable drawable = selectedDrawable;
+					if (touchDown == i && style.down != null) drawable = style.down;
+					drawable.draw(batch, x, y + itemY - itemHeight, width, itemHeight);
 					font.setColor(fontColorSelected.r, fontColorSelected.g, fontColorSelected.b, fontColorSelected.a * parentAlpha);
 				}
-				font.draw(batch, item.toString(), x + textOffsetX, y + itemY - textOffsetY);
+				drawItem(batch, font, i, item, x + textOffsetX, y + itemY - textOffsetY, textWidth);
 				if (selected) {
-					font.setColor(fontColorUnselected.r, fontColorUnselected.g, fontColorUnselected.b, fontColorUnselected.a
-						* parentAlpha);
+					font.setColor(fontColorUnselected.r, fontColorUnselected.g, fontColorUnselected.b,
+						fontColorUnselected.a * parentAlpha);
 				}
 			} else if (itemY < cullingArea.y) {
 				break;
 			}
 			itemY -= itemHeight;
 		}
+	}
+
+	protected GlyphLayout drawItem (Batch batch, BitmapFont font, int index, T item, float x, float y, float width) {
+		String string = toString(item);
+		return font.draw(batch, string, x, y, 0, string.length(), width, alignment, false, "...");
 	}
 
 	public ArraySelection<T> getSelection () {
@@ -174,6 +208,17 @@ public class List<T> extends Widget implements Cullable {
 	/** Returns the first selected item, or null. */
 	public T getSelected () {
 		return selection.first();
+	}
+
+	/** Sets the selection to only the passed item, if it is a possible choice.
+	 * @param item May be null. */
+	public void setSelected (T item) {
+		if (items.contains(item, false))
+			selection.set(item);
+		else if (selection.getRequired() && items.size > 0)
+			selection.set(items.first());
+		else
+			selection.clear();
 	}
 
 	/** @return The index of the first selected item. The top item has an index of 0. Nothing selected has an index of -1. */
@@ -186,42 +231,47 @@ public class List<T> extends Widget implements Cullable {
 	public void setSelectedIndex (int index) {
 		if (index < -1 || index >= items.size)
 			throw new IllegalArgumentException("index must be >= -1 and < " + items.size + ": " + index);
-		selection.set(items.get(index));
+		if (index == -1) {
+			selection.clear();
+		} else {
+			selection.set(items.get(index));
+		}
 	}
 
 	public void setItems (T... newItems) {
 		if (newItems == null) throw new IllegalArgumentException("newItems cannot be null.");
+		float oldPrefWidth = getPrefWidth(), oldPrefHeight = getPrefHeight();
 
 		items.clear();
 		items.addAll(newItems);
+		selection.validate();
 
-		if (selection.getRequired() && items.size > 0)
-			selection.set(items.first());
-		else
-			selection.clear();
-
-		invalidateHierarchy();
+		invalidate();
+		if (oldPrefWidth != getPrefWidth() || oldPrefHeight != getPrefHeight()) invalidateHierarchy();
 	}
 
-	/** Sets the current items, clearing the selection if it is no longer valid. If a selection is
+	/** Sets the items visible in the list, clearing the selection if it is no longer valid. If a selection is
 	 * {@link ArraySelection#getRequired()}, the first item is selected. */
 	public void setItems (Array newItems) {
 		if (newItems == null) throw new IllegalArgumentException("newItems cannot be null.");
+		float oldPrefWidth = getPrefWidth(), oldPrefHeight = getPrefHeight();
 
 		items.clear();
 		items.addAll(newItems);
+		selection.validate();
 
-		T selected = getSelected();
-		if (!items.contains(selected, false)) {
-			if (selection.getRequired() && items.size > 0)
-				selection.set(items.first());
-			else
-				selection.clear();
-		}
+		invalidate();
+		if (oldPrefWidth != getPrefWidth() || oldPrefHeight != getPrefHeight()) invalidateHierarchy();
+	}
 
+	public void clearItems () {
+		if (items.size == 0) return;
+		items.clear();
+		selection.clear();
 		invalidateHierarchy();
 	}
 
+	/** Returns the internal items array. If modified, {@link #setItems(Array)} must be called to reflect the changes. */
 	public Array<T> getItems () {
 		return items;
 	}
@@ -240,8 +290,18 @@ public class List<T> extends Widget implements Cullable {
 		return prefHeight;
 	}
 
+	protected String toString (T object) {
+		return object.toString();
+	}
+
 	public void setCullingArea (Rectangle cullingArea) {
 		this.cullingArea = cullingArea;
+	}
+
+	/** Sets the horizontal alignment of the list items.
+	 * @param alignment See {@link Align}. */
+	public void setAlignment (int alignment) {
+		this.alignment = alignment;
 	}
 
 	/** The style for a list, see {@link List}.
@@ -253,7 +313,7 @@ public class List<T> extends Widget implements Cullable {
 		public Color fontColorUnselected = new Color(1, 1, 1, 1);
 		public Drawable selection;
 		/** Optional. */
-		public Drawable background;
+		public Drawable down, background;
 
 		public ListStyle () {
 		}
@@ -270,6 +330,7 @@ public class List<T> extends Widget implements Cullable {
 			this.fontColorSelected.set(style.fontColorSelected);
 			this.fontColorUnselected.set(style.fontColorUnselected);
 			this.selection = style.selection;
+			this.down = style.down;
 		}
 	}
 }

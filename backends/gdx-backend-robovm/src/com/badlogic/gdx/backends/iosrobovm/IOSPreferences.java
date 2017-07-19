@@ -21,60 +21,56 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.Set;
 
+import org.robovm.apple.foundation.NSAutoreleasePool;
 import org.robovm.apple.foundation.NSMutableDictionary;
 import org.robovm.apple.foundation.NSNumber;
 import org.robovm.apple.foundation.NSObject;
 import org.robovm.apple.foundation.NSString;
-import org.robovm.objc.ObjCClass;
 
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.Preferences;
 
 public class IOSPreferences implements Preferences {
-
-	static {
-		// FIXME: Work around for a bug in RoboVM (https://github.com/robovm/robovm/issues/155).
-		//        These calls make sure NSNumber and NSString have been registered properly with the
-		//        RoboVM Objective-C bridge. Without them the get-methods below may throw ClassCastException.
-		ObjCClass.getByType(NSNumber.class);
-		ObjCClass.getByType(NSString.class);
-	}
-	
 	NSMutableDictionary<NSString, NSObject> nsDictionary;
-	String filePath;
+	File file;
 
 	public IOSPreferences (NSMutableDictionary<NSString, NSObject> nsDictionary, String filePath) {
 		this.nsDictionary = nsDictionary;
-		this.filePath = filePath;
+		this.file = new File(filePath);
 	}
 
 	@Override
-	public void putBoolean (String key, boolean val) {
+	public Preferences putBoolean (String key, boolean val) {
 		nsDictionary.put(convertKey(key), NSNumber.valueOf(val));
+		return this;
 	}
 
 	@Override
-	public void putInteger (String key, int val) {
+	public Preferences putInteger (String key, int val) {
 		nsDictionary.put(convertKey(key), NSNumber.valueOf(val));
+		return this;
 	}
 
 	@Override
-	public void putLong (String key, long val) {
+	public Preferences putLong (String key, long val) {
 		nsDictionary.put(convertKey(key), NSNumber.valueOf(val));
+		return this;
 	}
 
 	@Override
-	public void putFloat (String key, float val) {
+	public Preferences putFloat (String key, float val) {
 		nsDictionary.put(convertKey(key), NSNumber.valueOf(val));
+		return this;
 	}
 
 	@Override
-	public void putString (String key, String val) {
+	public Preferences putString (String key, String val) {
 		nsDictionary.put(convertKey(key), new NSString(val));
+		return this;
 	}
 
 	@Override
-	public void put (Map<String, ?> vals) {
+	public Preferences put (Map<String, ?> vals) {
 		Set<String> keySet = vals.keySet();
 		for (String key : keySet) {
 			Object value = vals.get(key);
@@ -90,6 +86,7 @@ public class IOSPreferences implements Preferences {
 				putFloat(key, (Float)value);
 			}
 		}
+		return this;
 	}
 
 	@Override
@@ -159,12 +156,12 @@ public class IOSPreferences implements Preferences {
 
 	@Override
 	public Map<String, ?> get () {
-		 Map<String, Object> map = new HashMap<String, Object>();
-		 for (NSString key : nsDictionary.keySet()) {
-			 NSObject value = nsDictionary.get(key);
-			 map.put(key.toString(), value.toString());
-		 }
-		 return map;
+		Map<String, Object> map = new HashMap<String, Object>();
+		for (NSString key : nsDictionary.keySet()) {
+			NSObject value = nsDictionary.get(key);
+			map.put(key.toString(), value.toString());
+		}
+		return map;
 	}
 
 	@Override
@@ -188,11 +185,10 @@ public class IOSPreferences implements Preferences {
 
 	@Override
 	public void flush () {
-		boolean fileWritten = nsDictionary.write(new File(filePath), false);
-		if (fileWritten)
-			Gdx.app.debug("IOSPreferences", "NSDictionary file written");
-		else
-			Gdx.app.debug("IOSPreferences", "Failed to write NSDictionary to file " + filePath);
+		NSAutoreleasePool pool = new NSAutoreleasePool();
+		if (!nsDictionary.write(file, false)) {
+			Gdx.app.debug("IOSPreferences", "Failed to write NSDictionary to file " + file);
+		}
+		pool.close();
 	}
-
 }

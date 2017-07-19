@@ -79,7 +79,7 @@ public class StagePerformanceTest extends GdxTest {
 
 		if (useStage) {
 			stage.act(Gdx.graphics.getDeltaTime());
-			stage.getSpriteBatch().disableBlending();
+			stage.getBatch().disableBlending();
 			Group root = stage.getRoot();
 			Array<Actor> actors = root.getChildren();
 // for(int i = 0; i < actors.size(); i++) {
@@ -102,7 +102,7 @@ public class StagePerformanceTest extends GdxTest {
 		batch.enableBlending();
 		batch.begin();
 		font.setColor(0, 0, 1, 1);
-		font.setScale(2);
+		font.getData().setScale(2);
 		font.draw(batch, "fps: " + Gdx.graphics.getFramesPerSecond() + (useStage ? ", stage" : "sprite"), 10, 40);
 		batch.end();
 

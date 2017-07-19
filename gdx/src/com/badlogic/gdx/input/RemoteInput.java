@@ -21,14 +21,13 @@ import java.io.IOException;
 import java.net.InetAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
-import java.util.HashSet;
-import java.util.Set;
 
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.Input;
+import com.badlogic.gdx.Input.TextInputListener;
 import com.badlogic.gdx.InputProcessor;
-import com.badlogic.gdx.graphics.Pixmap;
 import com.badlogic.gdx.utils.GdxRuntimeException;
+import com.badlogic.gdx.utils.IntSet;
 
 /** <p>
  * An {@link Input} implementation that receives touch, key, accelerometer and compass events from a remote Android device. Just
@@ -89,34 +88,55 @@ public class RemoteInput implements Runnable, Input {
 		@Override
 		public void run () {
 			justTouched = false;
+			if (keyJustPressed) {
+				keyJustPressed = false;
+				for (int i = 0; i < justPressedKeys.length; i++) {
+					justPressedKeys[i] = false;
+				}
+			}
+
 			if (processor != null) {
 				if (touchEvent != null) {
-					touchX[touchEvent.pointer] = touchEvent.x;
-					touchY[touchEvent.pointer] = touchEvent.y;
 					switch (touchEvent.type) {
 					case TouchEvent.TOUCH_DOWN:
+						deltaX[touchEvent.pointer] = 0;
+						deltaY[touchEvent.pointer] = 0;
 						processor.touchDown(touchEvent.x, touchEvent.y, touchEvent.pointer, Input.Buttons.LEFT);
 						isTouched[touchEvent.pointer] = true;
 						justTouched = true;
 						break;
 					case TouchEvent.TOUCH_UP:
+						deltaX[touchEvent.pointer] = 0;
+						deltaY[touchEvent.pointer] = 0;
 						processor.touchUp(touchEvent.x, touchEvent.y, touchEvent.pointer, Input.Buttons.LEFT);
 						isTouched[touchEvent.pointer] = false;
 						break;
 					case TouchEvent.TOUCH_DRAGGED:
+						deltaX[touchEvent.pointer] = touchEvent.x - touchX[touchEvent.pointer];
+						deltaY[touchEvent.pointer] = touchEvent.y - touchY[touchEvent.pointer];
 						processor.touchDragged(touchEvent.x, touchEvent.y, touchEvent.pointer);
 						break;
 					}
+					touchX[touchEvent.pointer] = touchEvent.x;
+					touchY[touchEvent.pointer] = touchEvent.y;
 				}
 				if (keyEvent != null) {
 					switch (keyEvent.type) {
 					case KeyEvent.KEY_DOWN:
 						processor.keyDown(keyEvent.keyCode);
-						keys.add(keyEvent.keyCode);
+						if (!keys[keyEvent.keyCode]) {
+							keyCount++;
+							keys[keyEvent.keyCode] = true;
+						}
+						keyJustPressed = true;
+						justPressedKeys[keyEvent.keyCode] = true;
 						break;
 					case KeyEvent.KEY_UP:
 						processor.keyUp(keyEvent.keyCode);
-						keys.remove(keyEvent.keyCode);
+						if (keys[keyEvent.keyCode]) {
+							keyCount--;
+							keys[keyEvent.keyCode] = false;
+						}
 						break;
 					case KeyEvent.KEY_TYPED:
 						processor.keyTyped(keyEvent.keyChar);
@@ -125,19 +145,41 @@ public class RemoteInput implements Runnable, Input {
 				}
 			} else {
 				if (touchEvent != null) {
-					touchX[touchEvent.pointer] = touchEvent.x;
-					touchY[touchEvent.pointer] = touchEvent.y;
-					if (touchEvent.type == TouchEvent.TOUCH_DOWN) {
+					switch(touchEvent.type) {
+					case TouchEvent.TOUCH_DOWN:
+						deltaX[touchEvent.pointer] = 0;
+						deltaY[touchEvent.pointer] = 0;
 						isTouched[touchEvent.pointer] = true;
 						justTouched = true;
-					}
-					if (touchEvent.type == TouchEvent.TOUCH_UP) {
+						break;
+					case TouchEvent.TOUCH_UP:
+						deltaX[touchEvent.pointer] = 0;
+						deltaY[touchEvent.pointer] = 0;
 						isTouched[touchEvent.pointer] = false;
+						break;
+					case TouchEvent.TOUCH_DRAGGED:
+						deltaX[touchEvent.pointer] = touchEvent.x - touchX[touchEvent.pointer];
+						deltaY[touchEvent.pointer] = touchEvent.y - touchY[touchEvent.pointer];
+						break;
 					}
+					touchX[touchEvent.pointer] = touchEvent.x;
+					touchY[touchEvent.pointer] = touchEvent.y;
 				}
 				if (keyEvent != null) {
-					if (keyEvent.type == KeyEvent.KEY_DOWN) keys.add(keyEvent.keyCode);
-					if (keyEvent.type == KeyEvent.KEY_UP) keys.remove(keyEvent.keyCode);
+					if (keyEvent.type == KeyEvent.KEY_DOWN) {
+						if (!keys[keyEvent.keyCode]) {
+							keyCount++;
+							keys[keyEvent.keyCode] = true;
+						}
+						keyJustPressed = true;
+						justPressedKeys[keyEvent.keyCode] = true;
+					}
+					if (keyEvent.type == KeyEvent.KEY_UP) {
+						if (keys[keyEvent.keyCode]) {
+							keyCount--;
+							keys[keyEvent.keyCode] = false;
+						}
+					}
 				}
 			}
 		}
@@ -146,13 +188,19 @@ public class RemoteInput implements Runnable, Input {
 	public static int DEFAULT_PORT = 8190;
 	private ServerSocket serverSocket;
 	private float[] accel = new float[3];
+	private float[] gyrate = new float[3];
 	private float[] compass = new float[3];
 	private boolean multiTouch = false;
 	private float remoteWidth = 0;
 	private float remoteHeight = 0;
 	private boolean connected = false;
 	private RemoteInputListener listener;
-	Set<Integer> keys = new HashSet<Integer>();
+	int keyCount = 0;
+	boolean[] keys = new boolean[256];
+	boolean keyJustPressed = false;
+	boolean[] justPressedKeys = new boolean[256];
+	int[] deltaX = new int[20];
+	int[] deltaY = new int[20];
 	int[] touchX = new int[20];
 	int[] touchY = new int[20];
 	boolean isTouched[] = new boolean[20];
@@ -227,6 +275,11 @@ public class RemoteInput implements Runnable, Input {
 					case RemoteSender.SIZE:
 						remoteWidth = in.readFloat();
 						remoteHeight = in.readFloat();
+						break;	
+					case RemoteSender.GYRO:
+						gyrate[0] = in.readFloat();
+						gyrate[1] = in.readFloat();
+						gyrate[2] = in.readFloat();
 						break;
 					case RemoteSender.KEY_DOWN:
 						keyEvent = new KeyEvent();
@@ -292,6 +345,21 @@ public class RemoteInput implements Runnable, Input {
 	public float getAccelerometerZ () {
 		return accel[2];
 	}
+	
+	@Override
+	public float getGyroscopeX () {
+		return gyrate[0];
+	}
+
+	@Override
+	public float getGyroscopeY () {
+		return gyrate[1];
+	}
+
+	@Override
+	public float getGyroscopeZ () {
+		return gyrate[2];
+	}
 
 	@Override
 	public int getX () {
@@ -338,17 +406,29 @@ public class RemoteInput implements Runnable, Input {
 
 	@Override
 	public boolean isKeyPressed (int key) {
-		return keys.contains(key);
+		if (key == Input.Keys.ANY_KEY) {
+			return keyCount > 0;
+		}
+		if (key < 0 || key > 255) {
+			return false;
+		}
+		return keys[key];
 	}
 
 	@Override
-	public void getTextInput (TextInputListener listener, String title, String text) {
-		Gdx.app.getInput().getTextInput(listener, title, text);
+	public boolean isKeyJustPressed (int key) {
+		if (key == Input.Keys.ANY_KEY) {
+			return keyJustPressed;
+		}
+		if (key < 0 || key > 255) {
+			return false;
+		}
+		return justPressedKeys[key];
 	}
 
 	@Override
-	public void getPlaceholderTextInput (TextInputListener listener, String title, String placeholder) {
-		Gdx.app.getInput().getPlaceholderTextInput(listener, title, placeholder);
+	public void getTextInput (TextInputListener listener, String title, String text, String hint) {
+		Gdx.app.getInput().getTextInput(listener, title, text, hint);
 	}
 
 	@Override
@@ -389,6 +469,22 @@ public class RemoteInput implements Runnable, Input {
 	public void setCatchBackKey (boolean catchBack) {
 
 	}
+
+	@Override
+	public boolean isCatchBackKey() {
+		return false;
+	}
+	
+	@Override
+	public void setCatchMenuKey (boolean catchMenu) {
+		
+	}
+	
+	@Override
+	public boolean isCatchMenuKey () {
+		return false;
+	}
+
 
 	@Override
 	public void setInputProcessor (InputProcessor processor) {
@@ -435,37 +531,26 @@ public class RemoteInput implements Runnable, Input {
 
 	@Override
 	public int getDeltaX () {
-		// TODO Auto-generated method stub
-		return 0;
+		return deltaX[0];
 	}
 
 	@Override
 	public int getDeltaX (int pointer) {
-		return 0;
+		return deltaX[pointer];
 	}
 
 	@Override
 	public int getDeltaY () {
-		return 0;
+		return deltaY[0];
 	}
 
 	@Override
 	public int getDeltaY (int pointer) {
-		return 0;
+		return deltaY[pointer];
 	}
 
 	@Override
 	public void setCursorPosition (int x, int y) {
-	}
-
-	@Override
-	public void setCursorImage (Pixmap pixmap, int xHotspot, int yHotspot) {
-	}
-
-	@Override
-	public void setCatchMenuKey (boolean catchMenu) {
-		// TODO Auto-generated method stub
-
 	}
 
 	@Override

@@ -43,7 +43,15 @@ public class IntAttribute extends Attribute {
 	}
 
 	@Override
-	protected boolean equals (Attribute other) {
-		return ((IntAttribute)other).value == value;
+	public int hashCode () {
+		int result = super.hashCode();
+		result = 983 * result + value;
+		return result; 
+	}
+	
+	@Override
+	public int compareTo (Attribute o) {
+		if (type != o.type) return (int)(type - o.type);
+		return value - ((IntAttribute)o).value;
 	}
 }

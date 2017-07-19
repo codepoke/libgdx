@@ -1,12 +1,12 @@
 /*******************************************************************************
  * Copyright 2011 See AUTHORS file.
- * 
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * 
+ *
  *   http://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -16,22 +16,16 @@
 
 package com.badlogic.gdx.tools.texturepacker;
 
-import com.badlogic.gdx.files.FileHandle;
-import com.badlogic.gdx.graphics.Pixmap.Format;
-import com.badlogic.gdx.graphics.Texture.TextureFilter;
-import com.badlogic.gdx.graphics.Texture.TextureWrap;
-import com.badlogic.gdx.graphics.g2d.TextureAtlas.TextureAtlasData;
-import com.badlogic.gdx.graphics.g2d.TextureAtlas.TextureAtlasData.Region;
-import com.badlogic.gdx.math.MathUtils;
-import com.badlogic.gdx.utils.Array;
-import com.badlogic.gdx.utils.GdxRuntimeException;
-
 import java.awt.Color;
 import java.awt.Graphics2D;
 import java.awt.image.BufferedImage;
 import java.io.File;
-import java.io.FileWriter;
+import java.io.FileOutputStream;
+import java.io.FileReader;
 import java.io.IOException;
+import java.io.OutputStreamWriter;
+import java.io.Writer;
+import java.util.Arrays;
 import java.util.Comparator;
 import java.util.HashSet;
 import java.util.Iterator;
@@ -43,6 +37,18 @@ import javax.imageio.ImageWriteParam;
 import javax.imageio.ImageWriter;
 import javax.imageio.stream.ImageOutputStream;
 
+import com.badlogic.gdx.files.FileHandle;
+import com.badlogic.gdx.graphics.Pixmap.Format;
+import com.badlogic.gdx.graphics.Texture.TextureFilter;
+import com.badlogic.gdx.graphics.Texture.TextureWrap;
+import com.badlogic.gdx.graphics.g2d.TextureAtlas.TextureAtlasData;
+import com.badlogic.gdx.graphics.g2d.TextureAtlas.TextureAtlasData.Region;
+import com.badlogic.gdx.math.MathUtils;
+import com.badlogic.gdx.utils.Array;
+import com.badlogic.gdx.utils.FloatArray;
+import com.badlogic.gdx.utils.GdxRuntimeException;
+import com.badlogic.gdx.utils.Json;
+
 /** @author Nathan Sweet */
 public class TexturePacker {
 	private final Settings settings;
@@ -50,6 +56,7 @@ public class TexturePacker {
 	private final ImageProcessor imageProcessor;
 	private final Array<InputImage> inputImages = new Array();
 	private File rootDir;
+	private ProgressListener progress;
 
 	/** @param rootDir Used to strip the root directory prefix from image file names, can be null. */
 	public TexturePacker (File rootDir, Settings settings) {
@@ -88,42 +95,69 @@ public class TexturePacker {
 	}
 
 	public void pack (File outputDir, String packFileName) {
+		if (packFileName.endsWith(settings.atlasExtension))
+			packFileName = packFileName.substring(0, packFileName.length() - settings.atlasExtension.length());
 		outputDir.mkdirs();
 
-		for (int i = 0, n = settings.scale.length; i < n; i++) {
+		if (progress == null) {
+			progress = new ProgressListener() {
+				public void progress (float progress) {
+				}
+			};
+		}
+		progress.reset();
+
+		progress.start(1);
+		int n = settings.scale.length;
+		for (int i = 0; i < n; i++) {
+			progress.start(1f / n);
+
+			progress.start(0.35f);
 			imageProcessor.setScale(settings.scale[i]);
-			for (InputImage inputImage : inputImages) {
+			for (int ii = 0, nn = inputImages.size; ii < nn; ii++) {
+				InputImage inputImage = inputImages.get(ii);
 				if (inputImage.file != null)
 					imageProcessor.addImage(inputImage.file);
 				else
 					imageProcessor.addImage(inputImage.image, inputImage.name);
+				if (progress.update(ii + 1, nn)) return;
 			}
+			progress.end();
 
-			Array<Page> pages = packer.pack(imageProcessor.getImages());
+			progress.start(0.19f);
+			Array<Page> pages = packer.pack(progress, imageProcessor.getImages());
+			progress.end();
 
-			String scaledPackFileName = settings.scaledPackFileName(packFileName, i);
-			File packFile = new File(outputDir, scaledPackFileName);
-			File packDir = packFile.getParentFile();
-			packDir.mkdirs();
+			progress.start(0.45f);
+			String scaledPackFileName = settings.getScaledPackFileName(packFileName, i);
+			writeImages(outputDir, scaledPackFileName, pages);
+			progress.end();
 
-			writeImages(packFile, pages);
+			progress.start(0.01f);
 			try {
-				writePackFile(packFile, pages);
+				writePackFile(outputDir, scaledPackFileName, pages);
 			} catch (IOException ex) {
 				throw new RuntimeException("Error writing pack file.", ex);
 			}
 			imageProcessor.clear();
+			progress.end();
+
+			progress.end();
+
+			if (progress.update(i + 1, n)) return;
 		}
+		progress.end();
 	}
 
-	private void writeImages (File packFile, Array<Page> pages) {
-		File packDir = packFile.getParentFile();
-		String imageName = packFile.getName();
-		int dotIndex = imageName.indexOf('.');
-		if (dotIndex != -1) imageName = imageName.substring(0, dotIndex);
+	private void writeImages (File outputDir, String scaledPackFileName, Array<Page> pages) {
+		File packFileNoExt = new File(outputDir, scaledPackFileName);
+		File packDir = packFileNoExt.getParentFile();
+		String imageName = packFileNoExt.getName();
 
 		int fileIndex = 0;
-		for (Page page : pages) {
+		for (int p = 0, pn = pages.size; p < pn; p++) {
+			Page page = pages.get(p);
+
 			int width = page.width, height = page.height;
 			int paddingX = settings.paddingX;
 			int paddingY = settings.paddingY;
@@ -145,6 +179,8 @@ public class TexturePacker {
 			}
 			width = Math.max(settings.minWidth, width);
 			height = Math.max(settings.minHeight, height);
+			page.imageWidth = width;
+			page.imageHeight = height;
 
 			File outputFile;
 			while (true) {
@@ -157,9 +193,11 @@ public class TexturePacker {
 			BufferedImage canvas = new BufferedImage(width, height, getBufferedImageType(settings.format));
 			Graphics2D g = (Graphics2D)canvas.getGraphics();
 
-			System.out.println("Writing " + canvas.getWidth() + "x" + canvas.getHeight() + ": " + outputFile);
+			if (!settings.silent) System.out.println("Writing " + canvas.getWidth() + "x" + canvas.getHeight() + ": " + outputFile);
 
-			for (Rect rect : page.outputRects) {
+			progress.start(1 / (float)pn);
+			for (int r = 0, rn = page.outputRects.size; r < rn; r++) {
+				Rect rect = page.outputRects.get(r);
 				BufferedImage image = rect.getImage(imageProcessor);
 				int iw = image.getWidth();
 				int ih = image.getHeight();
@@ -216,10 +254,14 @@ public class TexturePacker {
 					g.setColor(Color.magenta);
 					g.drawRect(rectX, rectY, rect.width - settings.paddingX - 1, rect.height - settings.paddingY - 1);
 				}
-			}
 
-			if (settings.bleed && !settings.premultiplyAlpha && !settings.outputFormat.equalsIgnoreCase("jpg")) {
-				canvas = new ColorBleedEffect().processImage(canvas, 2);
+				if (progress.update(r + 1, rn)) return;
+			}
+			progress.end();
+
+			if (settings.bleed && !settings.premultiplyAlpha
+				&& !(settings.outputFormat.equalsIgnoreCase("jpg") || settings.outputFormat.equalsIgnoreCase("jpeg"))) {
+				canvas = new ColorBleedEffect().processImage(canvas, settings.bleedIterations);
 				g = (Graphics2D)canvas.getGraphics();
 			}
 
@@ -230,7 +272,7 @@ public class TexturePacker {
 
 			ImageOutputStream ios = null;
 			try {
-				if (settings.outputFormat.equalsIgnoreCase("jpg")) {
+				if (settings.outputFormat.equalsIgnoreCase("jpg") || settings.outputFormat.equalsIgnoreCase("jpeg")) {
 					BufferedImage newImage = new BufferedImage(canvas.getWidth(), canvas.getHeight(), BufferedImage.TYPE_3BYTE_BGR);
 					newImage.getGraphics().drawImage(canvas, 0, 0, null);
 					canvas = newImage;
@@ -257,6 +299,8 @@ public class TexturePacker {
 					}
 				}
 			}
+
+			if (progress.update(p + 1, pn)) return;
 		}
 	}
 
@@ -276,7 +320,11 @@ public class TexturePacker {
 		}
 	}
 
-	private void writePackFile (File packFile, Array<Page> pages) throws IOException {
+	private void writePackFile (File outputDir, String scaledPackFileName, Array<Page> pages) throws IOException {
+		File packFile = new File(outputDir, scaledPackFileName + settings.atlasExtension);
+		File packDir = packFile.getParentFile();
+		packDir.mkdirs();
+
 		if (packFile.exists()) {
 			// Make sure there aren't duplicate names.
 			TextureAtlasData textureAtlasData = new TextureAtlasData(new FileHandle(packFile), new FileHandle(packFile), false);
@@ -285,24 +333,28 @@ public class TexturePacker {
 					String rectName = Rect.getAtlasName(rect.name, settings.flattenPaths);
 					for (Region region : textureAtlasData.getRegions()) {
 						if (region.name.equals(rectName)) {
-							throw new GdxRuntimeException("A region with the name \"" + rectName + "\" has already been packed: "
-								+ rect.name);
+							throw new GdxRuntimeException(
+								"A region with the name \"" + rectName + "\" has already been packed: " + rect.name);
 						}
 					}
 				}
 			}
 		}
 
-		FileWriter writer = new FileWriter(packFile, true);
+		Writer writer = new OutputStreamWriter(new FileOutputStream(packFile, true), "UTF-8");
 		for (Page page : pages) {
 			writer.write("\n" + page.imageName + "\n");
+			writer.write("size: " + page.imageWidth + "," + page.imageHeight + "\n");
 			writer.write("format: " + settings.format + "\n");
 			writer.write("filter: " + settings.filterMin + "," + settings.filterMag + "\n");
 			writer.write("repeat: " + getRepeatValue() + "\n");
 
+			page.outputRects.sort();
 			for (Rect rect : page.outputRects) {
 				writeRect(writer, page, rect, rect.name);
-				for (Alias alias : rect.aliases) {
+				Array<Alias> aliases = new Array(rect.aliases.toArray());
+				aliases.sort();
+				for (Alias alias : aliases) {
 					Rect aliasRect = new Rect();
 					aliasRect.set(rect);
 					alias.apply(aliasRect);
@@ -313,7 +365,7 @@ public class TexturePacker {
 		writer.close();
 	}
 
-	private void writeRect (FileWriter writer, Page page, Rect rect, String name) throws IOException {
+	private void writeRect (Writer writer, Page page, Rect rect, String name) throws IOException {
 		writer.write(Rect.getAtlasName(name, settings.flattenPaths) + "\n");
 		writer.write("  rotate: " + rect.rotated + "\n");
 		writer.write("  xy: " + (page.x + rect.x) + ", " + (page.y + page.height - rect.height - rect.y) + "\n");
@@ -354,17 +406,21 @@ public class TexturePacker {
 		}
 	}
 
+	public void setProgressListener (ProgressListener progressListener) {
+		this.progress = progressListener;
+	}
+
 	/** @author Nathan Sweet */
 	static public class Page {
 		public String imageName;
 		public Array<Rect> outputRects, remainingRects;
 		public float occupancy;
-		public int x, y, width, height;
+		public int x, y, width, height, imageWidth, imageHeight;
 	}
 
 	/** @author Regnarock
 	 * @author Nathan Sweet */
-	static public class Alias {
+	static public class Alias implements Comparable<Alias> {
 		public String name;
 		public int index;
 		public int[] splits;
@@ -392,10 +448,14 @@ public class TexturePacker {
 			rect.originalWidth = originalWidth;
 			rect.originalHeight = originalHeight;
 		}
+
+		public int compareTo (Alias o) {
+			return name.compareTo(o.name);
+		}
 	}
 
 	/** @author Nathan Sweet */
-	static public class Rect {
+	static public class Rect implements Comparable<Rect> {
 		public String name;
 		public int offsetX, offsetY, regionWidth, regionHeight, originalWidth, originalHeight;
 		public int x, y;
@@ -413,8 +473,9 @@ public class TexturePacker {
 		int score1, score2;
 
 		Rect (BufferedImage source, int left, int top, int newWidth, int newHeight, boolean isPatch) {
-			image = new BufferedImage(source.getColorModel(), source.getRaster().createWritableChild(left, top, newWidth, newHeight,
-				0, 0, null), source.getColorModel().isAlphaPremultiplied(), null);
+			image = new BufferedImage(source.getColorModel(),
+				source.getRaster().createWritableChild(left, top, newWidth, newHeight, 0, 0, null),
+				source.getColorModel().isAlphaPremultiplied(), null);
 			offsetX = left;
 			offsetY = top;
 			regionWidth = newWidth;
@@ -482,6 +543,10 @@ public class TexturePacker {
 			isPatch = rect.isPatch;
 		}
 
+		public int compareTo (Rect o) {
+			return name.compareTo(o.name);
+		}
+
 		@Override
 		public boolean equals (Object obj) {
 			if (this == obj) return true;
@@ -525,20 +590,30 @@ public class TexturePacker {
 		public boolean ignoreBlankImages = true;
 		public boolean fast;
 		public boolean debug;
+		public boolean silent;
 		public boolean combineSubdirectories;
+		public boolean ignore;
 		public boolean flattenPaths;
 		public boolean premultiplyAlpha;
 		public boolean useIndexes = true;
 		public boolean bleed = true;
+		public int bleedIterations = 2;
 		public boolean limitMemory = true;
 		public boolean grid;
 		public float[] scale = {1};
 		public String[] scaleSuffix = {""};
+		public String atlasExtension = ".atlas";
 
 		public Settings () {
 		}
 
+		/** @see #set(Settings) */
 		public Settings (Settings settings) {
+			set(settings);
+		}
+
+		/** Copies values from another instance to the current one */
+		public void set (Settings settings) {
 			fast = settings.fast;
 			rotation = settings.rotation;
 			pot = settings.pot;
@@ -563,25 +638,23 @@ public class TexturePacker {
 			wrapX = settings.wrapX;
 			wrapY = settings.wrapY;
 			debug = settings.debug;
+			silent = settings.silent;
 			combineSubdirectories = settings.combineSubdirectories;
+			ignore = settings.ignore;
 			flattenPaths = settings.flattenPaths;
 			premultiplyAlpha = settings.premultiplyAlpha;
 			square = settings.square;
 			useIndexes = settings.useIndexes;
 			bleed = settings.bleed;
+			bleedIterations = settings.bleedIterations;
 			limitMemory = settings.limitMemory;
-			scale = settings.scale;
-			scaleSuffix = settings.scaleSuffix;
+			grid = settings.grid;
+			scale = Arrays.copyOf(settings.scale, settings.scale.length);
+			scaleSuffix = Arrays.copyOf(settings.scaleSuffix, settings.scaleSuffix.length);
+			atlasExtension = settings.atlasExtension;
 		}
 
-		String scaledPackFileName (String packFileName, int scaleIndex) {
-			String extension = "";
-			int dotIndex = packFileName.lastIndexOf('.');
-			if (dotIndex != -1) {
-				extension = packFileName.substring(dotIndex);
-				packFileName = packFileName.substring(0, dotIndex);
-			}
-
+		public String getScaledPackFileName (String packFileName, int scaleIndex) {
 			// Use suffix if not empty string.
 			if (scaleSuffix[scaleIndex].length() > 0)
 				packFileName += scaleSuffix[scaleIndex];
@@ -593,10 +666,6 @@ public class TexturePacker {
 						+ "/" + packFileName;
 				}
 			}
-
-			packFileName += extension;
-			if (packFileName.indexOf('.') == -1 || packFileName.endsWith(".png") || packFileName.endsWith(".jpg"))
-				packFileName += ".atlas";
 			return packFileName;
 		}
 	}
@@ -607,12 +676,24 @@ public class TexturePacker {
 		process(new Settings(), input, output, packFileName);
 	}
 
+	static public void process (Settings settings, String input, String output, String packFileName) {
+		process(settings, input, output, packFileName, null);
+	}
+
 	/** @param input Directory containing individual images to be packed.
 	 * @param output Directory where the pack file and page images will be written.
-	 * @param packFileName The name of the pack file. Also used to name the page images. */
-	static public void process (Settings settings, String input, String output, String packFileName) {
+	 * @param packFileName The name of the pack file. Also used to name the page images.
+	 * @param progress May be null. */
+	static public void process (Settings settings, String input, String output, String packFileName,
+		final ProgressListener progress) {
 		try {
-			TexturePackerFileProcessor processor = new TexturePackerFileProcessor(settings, packFileName);
+			TexturePackerFileProcessor processor = new TexturePackerFileProcessor(settings, packFileName) {
+				protected TexturePacker newTexturePacker (File root, Settings settings) {
+					TexturePacker packer = super.newTexturePacker(root, settings);
+					packer.setProgressListener(progress);
+					return packer;
+				}
+			};
 			// Sort input files by name to avoid platform-dependent atlas output changes.
 			processor.setComparator(new Comparator<File>() {
 				public int compare (File file1, File file2) {
@@ -621,34 +702,71 @@ public class TexturePacker {
 			});
 			processor.process(new File(input), new File(output));
 		} catch (Exception ex) {
-			throw new RuntimeException("Error packing files.", ex);
+			throw new RuntimeException("Error packing images.", ex);
 		}
 	}
 
-	/** @return true if the output file does not yet exist or its last modification date is before the last modification date of the
-	 *         input file */
-	static public boolean isModified (String input, String output, String packFileName) {
+	/** @return true if the output file does not yet exist or its last modification date is before the last modification date of
+	 *         the input file */
+	static public boolean isModified (String input, String output, String packFileName, Settings settings) {
 		String packFullFileName = output;
-		if (!packFullFileName.endsWith("/")) packFullFileName += "/";
+
+		if (!packFullFileName.endsWith("/")) {
+			packFullFileName += "/";
+		}
+
+		// Check against the only file we know for sure will exist and will be changed if any asset changes:
+		// the atlas file
 		packFullFileName += packFileName;
+		packFullFileName += settings.atlasExtension;
 		File outputFile = new File(packFullFileName);
-		if (!outputFile.exists()) return true;
+
+		if (!outputFile.exists()) {
+			return true;
+		}
 
 		File inputFile = new File(input);
-		if (!inputFile.exists()) throw new IllegalArgumentException("Input file does not exist: " + inputFile.getAbsolutePath());
-		return inputFile.lastModified() > outputFile.lastModified();
+		if (!inputFile.exists()) {
+			throw new IllegalArgumentException("Input file does not exist: " + inputFile.getAbsolutePath());
+		}
+
+		return isModified(inputFile, outputFile.lastModified());
 	}
 
-	static public void processIfModified (String input, String output, String packFileName) {
-		if (isModified(input, output, packFileName)) process(input, output, packFileName);
+	static private boolean isModified (File file, long lastModified) {
+		if (file.lastModified() > lastModified) return true;
+		File[] children = file.listFiles();
+		if (children != null) {
+			for (File child : children)
+				if (isModified(child, lastModified)) return true;
+		}
+		return false;
 	}
 
-	static public void processIfModified (Settings settings, String input, String output, String packFileName) {
-		if (isModified(input, output, packFileName)) process(settings, input, output, packFileName);
+	static public boolean processIfModified (String input, String output, String packFileName) {
+		// Default settings (Needed to access the default atlas extension string)
+		Settings settings = new Settings();
+
+		if (isModified(input, output, packFileName, settings)) {
+			process(settings, input, output, packFileName);
+			return true;
+		}
+		return false;
+	}
+
+	static public boolean processIfModified (Settings settings, String input, String output, String packFileName) {
+		if (isModified(input, output, packFileName, settings)) {
+			process(settings, input, output, packFileName);
+			return true;
+		}
+		return false;
 	}
 
 	static public interface Packer {
 		public Array<Page> pack (Array<Rect> inputRects);
+
+		/** @param progress May be null. */
+		public Array<Page> pack (ProgressListener progress, Array<Rect> inputRects);
 	}
 
 	static final class InputImage {
@@ -657,10 +775,62 @@ public class TexturePacker {
 		BufferedImage image;
 	}
 
+	static public abstract class ProgressListener {
+		private float total, scale = 1, lastUpdate;
+		private final FloatArray portions = new FloatArray(8);
+		volatile boolean cancel;
+
+		void reset () {
+			scale = 1;
+			total = 0;
+			progress(total);
+		}
+
+		void start (float portion) {
+			if (portion == 0) throw new IllegalArgumentException("portion cannot be 0.");
+			portions.add(lastUpdate);
+			portions.add(portion * scale);
+			portions.add(scale);
+			scale *= portion;
+		}
+
+		/** Returns true if cancelled. */
+		boolean update (int current, int total) {
+			if (total == 0) throw new IllegalArgumentException("total cannot be 0.");
+			update(current / (float)total);
+			return isCancelled();
+		}
+
+		void update (float percent) {
+			lastUpdate = portions.get(portions.size - 3) + portions.get(portions.size - 2) * percent;
+			progress(lastUpdate);
+		}
+
+		void end () {
+			scale = portions.pop();
+			float portion = portions.pop();
+			lastUpdate = portions.pop() + portion;
+			progress(lastUpdate);
+		}
+
+		public void cancel () {
+			cancel = true;
+		}
+
+		public boolean isCancelled () {
+			return cancel;
+		}
+
+		abstract public void progress (float progress);
+	}
+
 	static public void main (String[] args) throws Exception {
+		Settings settings = null;
 		String input = null, output = null, packFileName = "pack.atlas";
 
 		switch (args.length) {
+		case 4:
+			settings = new Json().fromJson(Settings.class, new FileReader(args[3]));
 		case 3:
 			packFileName = args[2];
 		case 2:
@@ -669,7 +839,7 @@ public class TexturePacker {
 			input = args[0];
 			break;
 		default:
-			System.out.println("Usage: inputDir [outputDir] [packFileName]");
+			System.out.println("Usage: inputDir [outputDir] [packFileName] [settingsFileName]");
 			System.exit(0);
 		}
 
@@ -677,7 +847,8 @@ public class TexturePacker {
 			File inputFile = new File(input);
 			output = new File(inputFile.getParentFile(), inputFile.getName() + "-packed").getAbsolutePath();
 		}
+		if (settings == null) settings = new Settings();
 
-		process(input, output, packFileName);
+		process(settings, input, output, packFileName);
 	}
 }

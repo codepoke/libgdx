@@ -19,10 +19,11 @@ package com.badlogic.gdx.math;
 import java.io.Serializable;
 
 import com.badlogic.gdx.math.Vector2;
+import com.badlogic.gdx.utils.NumberUtils;
 
 /** A convenient 2D ellipse class, based on the circle class
  * @author tonyp7 */
-public class Ellipse implements Serializable {
+public class Ellipse implements Serializable, Shape2D {
 
 	public float x, y;
 	public float width, height;
@@ -48,8 +49,8 @@ public class Ellipse implements Serializable {
 	 * 
 	 * @param x X coordinate
 	 * @param y Y coordinate
-	 * @param width Width in pixels
-	 * @param height Height in pixels */
+	 * @param width the width of the ellipse
+	 * @param height the height of the ellipse */
 	public Ellipse (float x, float y, float width, float height) {
 		this.x = x;
 		this.y = y;
@@ -60,13 +61,30 @@ public class Ellipse implements Serializable {
 	/** Costructs a new ellipse
 	 * 
 	 * @param position Position vector
-	 * @param width Width in pixels
-	 * @param height Height in pixels */
+	 * @param width the width of the ellipse
+	 * @param height the height of the ellipse */
 	public Ellipse (Vector2 position, float width, float height) {
 		this.x = position.x;
 		this.y = position.y;
 		this.width = width;
 		this.height = height;
+	}
+
+	public Ellipse (Vector2 position, Vector2 size) {
+		this.x = position.x;
+		this.y = position.y;
+		this.width = size.x;
+		this.height = size.y;
+	}
+
+	/** Constructs a new {@link Ellipse} from the position and radius of a {@link Circle} (since circles are special cases of
+	 * ellipses).
+	 * @param circle The circle to take the values of */
+	public Ellipse (Circle circle) {
+		this.x = circle.x;
+		this.y = circle.y;
+		this.width = circle.radius;
+		this.height = circle.radius;
 	}
 
 	/** Checks whether or not this ellipse contains the given point.
@@ -95,8 +113,8 @@ public class Ellipse implements Serializable {
 	 * 
 	 * @param x X coordinate
 	 * @param y Y coordinate
-	 * @param width Width in pixels
-	 * @param height Height in pixels */
+	 * @param width the width of the ellipse
+	 * @param height the height of the ellipse */
 	public void set (float x, float y, float width, float height) {
 		this.x = x;
 		this.y = y;
@@ -112,6 +130,20 @@ public class Ellipse implements Serializable {
 		y = ellipse.y;
 		width = ellipse.width;
 		height = ellipse.height;
+	}
+
+	public void set (Circle circle) {
+		this.x = circle.x;
+		this.y = circle.y;
+		this.width = circle.radius;
+		this.height = circle.radius;
+	}
+
+	public void set (Vector2 position, Vector2 size) {
+		this.x = position.x;
+		this.y = position.y;
+		this.width = size.x;
+		this.height = size.y;
 	}
 
 	/** Sets the x and y-coordinates of ellipse center from a {@link Vector2}.
@@ -144,5 +176,45 @@ public class Ellipse implements Serializable {
 		this.height = height;
 
 		return this;
+	}
+
+	/** @return The area of this {@link Ellipse} as {@link MathUtils#PI} * {@link Ellipse#width} * {@link Ellipse#height} */
+	public float area () {
+		return MathUtils.PI * (this.width * this.height) / 4;
+	}
+
+	/** Approximates the circumference of this {@link Ellipse}. Oddly enough, the circumference of an ellipse is actually difficult
+	 * to compute exactly.
+	 * @return The Ramanujan approximation to the circumference of an ellipse if one dimension is at least three times longer than
+	 *         the other, else the simpler approximation */
+	public float circumference () {
+		float a = this.width / 2;
+		float b = this.height / 2;
+		if (a * 3 > b || b * 3 > a) {
+			// If one dimension is three times as long as the other...
+			return (float)(MathUtils.PI * ((3 * (a + b)) - Math.sqrt((3 * a + b) * (a + 3 * b))));
+		} else {
+			// We can use the simpler approximation, then
+			return (float)(MathUtils.PI2 * Math.sqrt((a * a + b * b) / 2));
+		}
+	}
+
+	@Override
+	public boolean equals (Object o) {
+		if (o == this) return true;
+		if (o == null || o.getClass() != this.getClass()) return false;
+		Ellipse e = (Ellipse)o;
+		return this.x == e.x && this.y == e.y && this.width == e.width && this.height == e.height;
+	}
+
+	@Override
+	public int hashCode () {
+		final int prime = 53;
+		int result = 1;
+		result = prime * result + NumberUtils.floatToRawIntBits(this.height);
+		result = prime * result + NumberUtils.floatToRawIntBits(this.width);
+		result = prime * result + NumberUtils.floatToRawIntBits(this.x);
+		result = prime * result + NumberUtils.floatToRawIntBits(this.y);
+		return result;
 	}
 }

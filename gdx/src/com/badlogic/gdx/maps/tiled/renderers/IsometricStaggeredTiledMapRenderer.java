@@ -20,9 +20,7 @@ import static com.badlogic.gdx.graphics.g2d.SpriteBatch.*;
 
 import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.g2d.Batch;
-import com.badlogic.gdx.graphics.g2d.SpriteBatch;
 import com.badlogic.gdx.graphics.g2d.TextureRegion;
-import com.badlogic.gdx.maps.MapObject;
 import com.badlogic.gdx.maps.tiled.TiledMap;
 import com.badlogic.gdx.maps.tiled.TiledMapTile;
 import com.badlogic.gdx.maps.tiled.TiledMapTileLayer;
@@ -47,17 +45,16 @@ public class IsometricStaggeredTiledMapRenderer extends BatchTiledMapRenderer {
 	}
 
 	@Override
-	public void renderObject (MapObject object) {
-
-	}
-
-	@Override
 	public void renderTileLayer (TiledMapTileLayer layer) {
-		final Color batchColor = spriteBatch.getColor();
+		final Color batchColor = batch.getColor();
 		final float color = Color.toFloatBits(batchColor.r, batchColor.g, batchColor.b, batchColor.a * layer.getOpacity());
 
 		final int layerWidth = layer.getWidth();
 		final int layerHeight = layer.getHeight();
+
+		final float layerOffsetX = layer.getOffsetX() * unitScale;
+		// offset in tiled is y down, so we flip it
+		final float layerOffsetY = -layer.getOffsetY() * unitScale;
 
 		final float layerTileWidth = layer.getTileWidth() * unitScale;
 		final float layerTileHeight = layer.getTileHeight() * unitScale;
@@ -65,12 +62,13 @@ public class IsometricStaggeredTiledMapRenderer extends BatchTiledMapRenderer {
 		final float layerTileWidth50 = layerTileWidth * 0.50f;
 		final float layerTileHeight50 = layerTileHeight * 0.50f;
 
-		final int minX = Math.max(0, (int)(((viewBounds.x - layerTileWidth50) / layerTileWidth)));
+		final int minX = Math.max(0, (int)(((viewBounds.x - layerTileWidth50 - layerOffsetX) / layerTileWidth)));
 		final int maxX = Math.min(layerWidth,
-			(int)((viewBounds.x + viewBounds.width + layerTileWidth + layerTileWidth50) / layerTileWidth));
+			(int)((viewBounds.x + viewBounds.width + layerTileWidth + layerTileWidth50 - layerOffsetX) / layerTileWidth));
 
-		final int minY = Math.max(0, (int)(((viewBounds.y - layerTileHeight) / layerTileHeight)));
-		final int maxY = Math.min(layerHeight, (int)((viewBounds.y + viewBounds.height + layerTileHeight) / layerTileHeight50));
+		final int minY = Math.max(0, (int)(((viewBounds.y - layerTileHeight - layerOffsetY) / layerTileHeight)));
+		final int maxY = Math.min(layerHeight,
+			(int)((viewBounds.y + viewBounds.height + layerTileHeight - layerOffsetY) / layerTileHeight50));
 
 		for (int y = maxY - 1; y >= minY; y--) {
 			float offsetX = (y % 2 == 1) ? layerTileWidth50 : 0;
@@ -85,8 +83,8 @@ public class IsometricStaggeredTiledMapRenderer extends BatchTiledMapRenderer {
 					final int rotations = cell.getRotation();
 					TextureRegion region = tile.getTextureRegion();
 
-					float x1 = x * layerTileWidth - offsetX;
-					float y1 = y * layerTileHeight50;
+					float x1 = x * layerTileWidth - offsetX + tile.getOffsetX() * unitScale + layerOffsetX;
+					float y1 = y * layerTileHeight50 + tile.getOffsetY() * unitScale + layerOffsetY;
 					float x2 = x1 + region.getRegionWidth() * unitScale;
 					float y2 = y1 + region.getRegionHeight() * unitScale;
 
@@ -184,7 +182,7 @@ public class IsometricStaggeredTiledMapRenderer extends BatchTiledMapRenderer {
 						}
 						}
 					}
-					spriteBatch.draw(region.getTexture(), vertices, 0, 20);
+					batch.draw(region.getTexture(), vertices, 0, NUM_VERTICES);
 				}
 			}
 		}

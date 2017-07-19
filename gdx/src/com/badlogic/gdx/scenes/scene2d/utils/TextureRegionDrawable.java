@@ -16,8 +16,12 @@
 
 package com.badlogic.gdx.scenes.scene2d.utils;
 
+import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.g2d.Batch;
+import com.badlogic.gdx.graphics.g2d.Sprite;
 import com.badlogic.gdx.graphics.g2d.TextureRegion;
+import com.badlogic.gdx.graphics.g2d.TextureAtlas.AtlasRegion;
+import com.badlogic.gdx.graphics.g2d.TextureAtlas.AtlasSprite;
 
 /** Drawable for a {@link TextureRegion}.
  * @author Nathan Sweet */
@@ -48,11 +52,30 @@ public class TextureRegionDrawable extends BaseDrawable implements TransformDraw
 
 	public void setRegion (TextureRegion region) {
 		this.region = region;
-		setMinWidth(region.getRegionWidth());
-		setMinHeight(region.getRegionHeight());
+		if (region != null) {
+			setMinWidth(region.getRegionWidth());
+			setMinHeight(region.getRegionHeight());
+		}
 	}
 
 	public TextureRegion getRegion () {
 		return region;
+	}
+
+	/** Creates a new drawable that renders the same as this drawable tinted the specified color. */
+	public Drawable tint (Color tint) {
+		Sprite sprite;
+		if (region instanceof AtlasRegion)
+			sprite = new AtlasSprite((AtlasRegion)region);
+		else
+			sprite = new Sprite(region);
+		sprite.setColor(tint);
+		sprite.setSize(getMinWidth(), getMinHeight());
+		SpriteDrawable drawable = new SpriteDrawable(sprite);
+		drawable.setLeftWidth(getLeftWidth());
+		drawable.setRightWidth(getRightWidth());
+		drawable.setTopHeight(getTopHeight());
+		drawable.setBottomHeight(getBottomHeight());
+		return drawable;
 	}
 }
