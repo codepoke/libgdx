@@ -16,15 +16,13 @@
 
 package com.badlogic.gdx.scenes.scene2d.ui;
 
-import com.esotericsoftware.tablelayout.Cell;
-
 import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.g2d.Batch;
 import com.badlogic.gdx.graphics.g2d.BitmapFont;
 import com.badlogic.gdx.scenes.scene2d.ui.Label.LabelStyle;
 import com.badlogic.gdx.scenes.scene2d.ui.TextButton.TextButtonStyle;
-import com.badlogic.gdx.scenes.scene2d.utils.Align;
 import com.badlogic.gdx.scenes.scene2d.utils.Drawable;
+import com.badlogic.gdx.utils.Align;
 import com.badlogic.gdx.utils.Scaling;
 
 /** A button with a child {@link Image} and {@link Label}.
@@ -55,10 +53,11 @@ public class ImageTextButton extends Button {
 
 		image = new Image();
 		image.setScaling(Scaling.fit);
-		add(image);
 
 		label = new Label(text, new LabelStyle(style.font, style.fontColor));
 		label.setAlignment(Align.center);
+
+		add(image);
 		add(label);
 
 		setStyle(style);
@@ -84,24 +83,26 @@ public class ImageTextButton extends Button {
 		return style;
 	}
 
-	private void updateImage () {
-		boolean isPressed = isPressed();
-		if (isDisabled && style.imageDisabled != null)
-			image.setDrawable(style.imageDisabled);
-		else if (isPressed && style.imageDown != null)
-			image.setDrawable(style.imageDown);
+	/** Updates the Image with the appropriate Drawable from the style before it is drawn. */
+	protected void updateImage () {
+		Drawable drawable = null;
+		if (isDisabled() && style.imageDisabled != null)
+			drawable = style.imageDisabled;
+		else if (isPressed() && style.imageDown != null)
+			drawable = style.imageDown;
 		else if (isChecked && style.imageChecked != null)
-			image.setDrawable((style.imageCheckedOver != null && isOver()) ? style.imageCheckedOver : style.imageChecked);
+			drawable = (style.imageCheckedOver != null && isOver()) ? style.imageCheckedOver : style.imageChecked;
 		else if (isOver() && style.imageOver != null)
-			image.setDrawable(style.imageOver);
+			drawable = style.imageOver;
 		else if (style.imageUp != null) //
-			image.setDrawable(style.imageUp);
+			drawable = style.imageUp;
+		image.setDrawable(drawable);
 	}
 
 	public void draw (Batch batch, float parentAlpha) {
 		updateImage();
 		Color fontColor;
-		if (isDisabled && style.disabledFontColor != null)
+		if (isDisabled() && style.disabledFontColor != null)
 			fontColor = style.disabledFontColor;
 		else if (isPressed() && style.downFontColor != null)
 			fontColor = style.downFontColor;
@@ -131,7 +132,7 @@ public class ImageTextButton extends Button {
 		return getCell(label);
 	}
 
-	public void setText (String text) {
+	public void setText (CharSequence text) {
 		label.setText(text);
 	}
 

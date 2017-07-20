@@ -32,7 +32,7 @@ public class Body {
 	final Array<Fixture> fixtures = new Array<Fixture>();
 	final Array<JointEdge> joints = new Array<JointEdge>();
 
-	/** Constructs a new body with the given address
+	/** Constructs a new body with the given address.
 	 * @param world the world
 	 * @param addr the address */
 	protected Body (World world, org.jbox2d.dynamics.Body body) {
@@ -186,7 +186,7 @@ public class Body {
 	public void applyLinearImpulse (Vector2 impulse, Vector2 point, boolean wake) {
 		tmp.set(impulse.x, impulse.y);
 		tmp2.set(point.x, point.y);
-		body.applyLinearImpulse(tmp, tmp2);
+		body.applyLinearImpulse(tmp, tmp2, wake);
 	}
 
 	/** Apply an impulse at a point. This immediately modifies the velocity. It also modifies the angular velocity if the point of
@@ -198,7 +198,7 @@ public class Body {
 	public void applyLinearImpulse (float impulseX, float impulseY, float pointX, float pointY, boolean wake) {
 		tmp.set(impulseX, impulseY);
 		tmp2.set(pointX, pointY);
-		body.applyLinearImpulse(tmp, tmp2);
+		body.applyLinearImpulse(tmp, tmp2, wake);
 	}
 
 	/** Apply an angular impulse.
@@ -251,7 +251,7 @@ public class Body {
 	private final Vector2 worldPoint = new Vector2();
 
 	/** Get the world coordinates of a point given the local coordinates.
-	 * @param localPoint a point on the body measured relative the the body's origin.
+	 * @param localPoint a point on the body measured relative to the the body's origin.
 	 * @return the same point expressed in world coordinates. */
 	public Vector2 getWorldPoint (Vector2 localPoint) {
 		tmp.set(localPoint.x, localPoint.y);
@@ -367,7 +367,7 @@ public class Body {
 		body.setSleepingAllowed(flag);
 	}
 
-	/** Is this body allowed to sleep */
+	/** Is this body allowed to sleep? */
 	public boolean isSleepingAllowed () {
 		return body.isSleepingAllowed();
 	}
@@ -471,7 +471,7 @@ public class Body {
 		return body.getGravityScale();
 	}
 
-	/** Sets the gravity scale of the body */
+	/** Set the gravity scale of the body */
 	public void setGravityScale (float scale) {
 		body.setGravityScale(scale);
 	}

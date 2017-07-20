@@ -26,6 +26,8 @@ import com.badlogic.gdx.physics.box2d.joints.FrictionJoint;
 import com.badlogic.gdx.physics.box2d.joints.FrictionJointDef;
 import com.badlogic.gdx.physics.box2d.joints.GearJoint;
 import com.badlogic.gdx.physics.box2d.joints.GearJointDef;
+import com.badlogic.gdx.physics.box2d.joints.MotorJoint;
+import com.badlogic.gdx.physics.box2d.joints.MotorJointDef;
 import com.badlogic.gdx.physics.box2d.joints.MouseJoint;
 import com.badlogic.gdx.physics.box2d.joints.MouseJointDef;
 import com.badlogic.gdx.physics.box2d.joints.PrismaticJoint;
@@ -202,7 +204,7 @@ b2ContactFilter defaultFilter;
 	};
 
 	/** the address of the world instance **/
-	private final long addr;
+	protected final long addr;
 
 	/** all known bodies **/
 	protected final LongMap<Body> bodies = new LongMap<Body>(100);
@@ -315,16 +317,19 @@ b2ContactFilter defaultFilter;
 	 * @warning This automatically deletes all associated shapes and joints.
 	 * @warning This function is locked during callbacks. */
 	public void destroyBody (Body body) {
-		body.setUserData(null);
-		this.bodies.remove(body.addr);
-		Array<Fixture> fixtureList = body.getFixtureList();
-		while(fixtureList.size > 0) {
-			this.fixtures.remove(fixtureList.removeIndex(0).addr).setUserData(null);
-		}
 		Array<JointEdge> jointList = body.getJointList();
 		while (jointList.size > 0)
 			destroyJoint(body.getJointList().get(0).joint);
 		jniDestroyBody(addr, body.addr);
+		body.setUserData(null);
+		this.bodies.remove(body.addr);
+		Array<Fixture> fixtureList = body.getFixtureList();
+		while(fixtureList.size > 0) {
+			Fixture fixtureToDelete = fixtureList.removeIndex(0);
+ 			this.fixtures.remove(fixtureToDelete.addr).setUserData(null);
+ 			freeFixtures.free(fixtureToDelete);
+ 		}
+		
 		freeBodies.free(body);
 	}
 
@@ -339,6 +344,46 @@ b2ContactFilter defaultFilter;
 		world->SetContactFilter(&defaultFilter);
 		world->SetContactListener(0);
 	*/
+	
+	/** Internal method for fixture destruction with notifying custom
+	 * contact listener
+	 * @param body
+	 * @param fixture */
+	void destroyFixture(Body body, Fixture fixture) {
+		jniDestroyFixture(addr, body.addr, fixture.addr);
+	}
+	
+	private native void jniDestroyFixture(long addr, long bodyAddr, long fixtureAddr); /*
+		b2World* world = (b2World*)(addr);
+		b2Body* body = (b2Body*)(bodyAddr);
+		b2Fixture* fixture = (b2Fixture*)(fixtureAddr);
+		CustomContactFilter contactFilter(env, object);
+		CustomContactListener contactListener(env, object);
+		world->SetContactFilter(&contactFilter);
+		world->SetContactListener(&contactListener);
+		body->DestroyFixture(fixture);
+		world->SetContactFilter(&defaultFilter);
+		world->SetContactListener(0);
+	*/
+	
+	/** Internal method for body deactivation with notifying custom
+	 * contact listener
+	 * @param body */
+	void deactivateBody(Body body) {
+		jniDeactivateBody(addr, body.addr);
+	}
+	
+	private native void jniDeactivateBody(long addr, long bodyAddr); /*
+		b2World* world = (b2World*)(addr);
+		b2Body* body = (b2Body*)(bodyAddr);	
+		CustomContactFilter contactFilter(env, object);
+		CustomContactListener contactListener(env, object);
+		world->SetContactFilter(&contactFilter);
+		world->SetContactListener(&contactListener);
+		body->SetActive(false);
+		world->SetContactFilter(&defaultFilter);
+		world->SetContactListener(0);
+	*/
 
 	/** Create a joint to constrain bodies together. No reference to the definition is retained. This may cause the connected bodies
 	 * to cease colliding.
@@ -349,12 +394,13 @@ b2ContactFilter defaultFilter;
 		if (def.type == JointType.DistanceJoint) joint = new DistanceJoint(this, jointAddr);
 		if (def.type == JointType.FrictionJoint) joint = new FrictionJoint(this, jointAddr);
 		if (def.type == JointType.GearJoint) joint = new GearJoint(this, jointAddr, ((GearJointDef) def).joint1, ((GearJointDef) def).joint2);
+		if (def.type == JointType.MotorJoint) joint = new MotorJoint(this, jointAddr);
 		if (def.type == JointType.MouseJoint) joint = new MouseJoint(this, jointAddr);
 		if (def.type == JointType.PrismaticJoint) joint = new PrismaticJoint(this, jointAddr);
 		if (def.type == JointType.PulleyJoint) joint = new PulleyJoint(this, jointAddr);
 		if (def.type == JointType.RevoluteJoint) joint = new RevoluteJoint(this, jointAddr);
-		if (def.type == JointType.WeldJoint) joint = new WeldJoint(this, jointAddr);
 		if (def.type == JointType.RopeJoint) joint = new RopeJoint(this, jointAddr);
+		if (def.type == JointType.WeldJoint) joint = new WeldJoint(this, jointAddr);
 		if (def.type == JointType.WheelJoint) joint = new WheelJoint(this, jointAddr);
 		if (joint != null) joints.put(joint.addr, joint);
 		JointEdge jointEdgeA = new JointEdge(def.bodyB, joint);
@@ -381,6 +427,11 @@ b2ContactFilter defaultFilter;
 			GearJointDef d = (GearJointDef)def;
 			return jniCreateGearJoint(addr, d.bodyA.addr, d.bodyB.addr, d.collideConnected, d.joint1.addr, d.joint2.addr, d.ratio);
 		}
+		if (def.type == JointType.MotorJoint) {
+			MotorJointDef d = (MotorJointDef)def;
+			return jniCreateMotorJoint(addr, d.bodyA.addr, d.bodyB.addr, d.collideConnected, d.linearOffset.x, d.linearOffset.y,
+				d.angularOffset, d.maxForce, d.maxTorque, d.correctionFactor);
+		}
 		if (def.type == JointType.MouseJoint) {
 			MouseJointDef d = (MouseJointDef)def;
 			return jniCreateMouseJoint(addr, d.bodyA.addr, d.bodyB.addr, d.collideConnected, d.target.x, d.target.y, d.maxForce,
@@ -405,15 +456,15 @@ b2ContactFilter defaultFilter;
 				d.localAnchorB.x, d.localAnchorB.y, d.referenceAngle, d.enableLimit, d.lowerAngle, d.upperAngle, d.enableMotor,
 				d.motorSpeed, d.maxMotorTorque);
 		}
-		if (def.type == JointType.WeldJoint) {
-			WeldJointDef d = (WeldJointDef)def;
-			return jniCreateWeldJoint(addr, d.bodyA.addr, d.bodyB.addr, d.collideConnected, d.localAnchorA.x, d.localAnchorA.y,
-				d.localAnchorB.x, d.localAnchorB.y, d.referenceAngle);
-		}
 		if (def.type == JointType.RopeJoint) {
 			RopeJointDef d = (RopeJointDef)def;
 			return jniCreateRopeJoint(addr, d.bodyA.addr, d.bodyB.addr, d.collideConnected, d.localAnchorA.x, d.localAnchorA.y,
 				d.localAnchorB.x, d.localAnchorB.y, d.maxLength);
+		}
+		if (def.type == JointType.WeldJoint) {
+			WeldJointDef d = (WeldJointDef)def;
+			return jniCreateWeldJoint(addr, d.bodyA.addr, d.bodyB.addr, d.collideConnected, d.localAnchorA.x, d.localAnchorA.y,
+				d.localAnchorB.x, d.localAnchorB.y, d.referenceAngle, d.frequencyHz, d.dampingRatio);
 		}
 		if (def.type == JointType.WheelJoint) {
 			WheelJointDef d = (WheelJointDef)def;
@@ -502,6 +553,21 @@ b2ContactFilter defaultFilter;
 		return (jlong)world->CreateJoint(&def);
 	*/
 
+	private native long jniCreateMotorJoint (long addr, long bodyA, long bodyB, boolean collideConnected, float linearOffsetX,
+		float linearOffsetY, float angularOffset, float maxForce, float maxTorque, float correctionFactor); /*
+		b2World* world = (b2World*)addr;
+		b2MotorJointDef def;
+		def.bodyA = (b2Body*)bodyA;
+		def.bodyB = (b2Body*)bodyB;
+		def.collideConnected = collideConnected;
+		def.linearOffset = b2Vec2( linearOffsetX, linearOffsetY );
+		def.angularOffset = angularOffset;
+		def.maxForce = maxForce;
+		def.maxTorque = maxTorque;
+		def.correctionFactor = correctionFactor;
+		return (jlong)world->CreateJoint(&def);
+	*/
+
 	private native long jniCreateMouseJoint (long addr, long bodyA, long bodyB, boolean collideConnected, float targetX,
 		float targetY, float maxForce, float frequencyHz, float dampingRatio); /*
 		b2World* world = (b2World*)addr;
@@ -578,7 +644,7 @@ b2ContactFilter defaultFilter;
 	*/
 
 	private native long jniCreateWeldJoint (long addr, long bodyA, long bodyB, boolean collideConnected, float localAnchorAX,
-		float localAnchorAY, float localAnchorBX, float localAnchorBY, float referenceAngle); /*
+		float localAnchorAY, float localAnchorBX, float localAnchorBY, float referenceAngle, float frequencyHz, float dampingRatio); /*
 		b2World* world = (b2World*)addr;
 		b2WeldJointDef def;
 		def.bodyA = (b2Body*)bodyA;
@@ -587,6 +653,8 @@ b2ContactFilter defaultFilter;
 		def.localAnchorA = b2Vec2(localAnchorAX, localAnchorAY);
 		def.localAnchorB = b2Vec2(localAnchorBX, localAnchorBY);
 		def.referenceAngle = referenceAngle;
+		def.frequencyHz = frequencyHz;
+		def.dampingRatio = dampingRatio;
 	
 		return (jlong)world->CreateJoint(&def);
 	*/
@@ -685,6 +753,11 @@ b2ContactFilter defaultFilter;
 		b2World* world = (b2World*)addr;
 		return world->GetBodyCount();
 	*/
+	
+	/** Get the number of fixtures. */
+	public int getFixtureCount () {
+		return fixtures.size;
+	}
 
 	/** Get the number of joints. */
 	public int getJointCount () {
@@ -844,6 +917,15 @@ b2ContactFilter defaultFilter;
 		}		
 	}
 
+	/** @param fixtures an Array in which to place all fixtures currently in the simulation */
+	public void getFixtures (Array<Fixture> fixtures) {
+		fixtures.clear();
+		fixtures.ensureCapacity(this.fixtures.size);
+		for (Iterator<Fixture> iter = this.fixtures.values(); iter.hasNext();) {
+			fixtures.add(iter.next());
+		}		
+	}
+
 	/** @param joints an Array in which to place all joints currently in the simulation */
 	public void getJoints (Array<Joint> joints) {
 		joints.clear();
@@ -943,8 +1025,18 @@ b2ContactFilter defaultFilter;
 	 * @param point1 the ray starting point
 	 * @param point2 the ray ending point */
 	public void rayCast (RayCastCallback callback, Vector2 point1, Vector2 point2) {
+		rayCast(callback, point1.x, point1.y, point2.x, point2.y);
+	}
+
+	/** Ray-cast the world for all fixtures in the path of the ray. The ray-cast ignores shapes that contain the starting point.
+	 * @param callback a user implemented callback class.
+	 * @param point1X the ray starting point X
+	 * @param point1Y the ray starting point Y
+	 * @param point2X the ray ending point X
+	 * @param point2Y the ray ending point Y */
+	public void rayCast (RayCastCallback callback, float point1X, float point1Y, float point2X, float point2Y) {
 		rayCastCallback = callback;
-		jniRayCast(addr, point1.x, point1.y, point2.x, point2.y);
+		jniRayCast(addr, point1X, point1Y, point2X, point2Y);
 	}
 
 	private RayCastCallback rayCastCallback = null;

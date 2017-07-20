@@ -94,7 +94,7 @@ public class ImageProcessor {
 		Rect rect = processImage(image, name);
 
 		if (rect == null) {
-			System.out.println("Ignoring blank input image: " + name);
+			if (!settings.silent) System.out.println("Ignoring blank input image: " + name);
 			return null;
 		}
 
@@ -102,7 +102,7 @@ public class ImageProcessor {
 			String crc = hash(rect.getImage(this));
 			Rect existing = crcs.get(crc);
 			if (existing != null) {
-				System.out.println(rect.name + " (alias of " + existing.name + ")");
+				if (!settings.silent) System.out.println(rect.name + " (alias of " + existing.name + ")");
 				existing.aliases.add(new Alias(rect));
 				return null;
 			}
@@ -157,8 +157,8 @@ public class ImageProcessor {
 		// Scale image.
 		if (scale != 1) {
 			int originalWidth = width, originalHeight = height;
-			width = Math.round(width * scale);
-			height = Math.round(height * scale);
+			width = Math.max(1, Math.round(width * scale));
+			height = Math.max(1, Math.round(height * scale));
 			BufferedImage newImage = new BufferedImage(width, height, BufferedImage.TYPE_4BYTE_ABGR);
 			if (scale < 1) {
 				newImage.getGraphics().drawImage(image.getScaledInstance(width, height, Image.SCALE_AREA_AVERAGING), 0, 0, null);
@@ -205,7 +205,7 @@ public class ImageProcessor {
 		final byte[] a = new byte[1];
 		int top = 0;
 		int bottom = source.getHeight();
-		if (settings.stripWhitespaceX) {
+		if (settings.stripWhitespaceY) {
 			outer:
 			for (int y = 0; y < source.getHeight(); y++) {
 				for (int x = 0; x < source.getWidth(); x++) {
@@ -226,10 +226,15 @@ public class ImageProcessor {
 				}
 				bottom--;
 			}
+			// Leave 1px so nothing is copied into padding.
+			if (settings.duplicatePadding) {
+				if (top > 0) top--;
+				if (bottom < source.getHeight()) bottom++;
+			}
 		}
 		int left = 0;
 		int right = source.getWidth();
-		if (settings.stripWhitespaceY) {
+		if (settings.stripWhitespaceX) {
 			outer:
 			for (int x = 0; x < source.getWidth(); x++) {
 				for (int y = top; y < bottom; y++) {
@@ -249,6 +254,11 @@ public class ImageProcessor {
 					if (alpha > settings.alphaThreshold) break outer;
 				}
 				right--;
+			}
+			// Leave 1px so nothing is copied into padding.
+			if (settings.duplicatePadding) {
+				if (left > 0) left--;
+				if (right < source.getWidth()) right++;
 			}
 		}
 		int newWidth = right - left;
@@ -378,11 +388,12 @@ public class ImageProcessor {
 		return pads;
 	}
 
-	/** Hunts for the start or end of a sequence of split pixels. Begins searching at (startX, startY) then follows along the x or y
-	 * axis (depending on value of xAxis) for the first non-transparent pixel if startPoint is true, or the first transparent pixel
-	 * if startPoint is false. Returns 0 if none found, as 0 is considered an invalid split point being in the outer border which
-	 * will be stripped. */
-	static private int getSplitPoint (WritableRaster raster, String name, int startX, int startY, boolean startPoint, boolean xAxis) {
+	/** Hunts for the start or end of a sequence of split pixels. Begins searching at (startX, startY) then follows along the x or
+	 * y axis (depending on value of xAxis) for the first non-transparent pixel if startPoint is true, or the first transparent
+	 * pixel if startPoint is false. Returns 0 if none found, as 0 is considered an invalid split point being in the outer border
+	 * which will be stripped. */
+	static private int getSplitPoint (WritableRaster raster, String name, int startX, int startY, boolean startPoint,
+		boolean xAxis) {
 		int[] rgba = new int[4];
 
 		int next = xAxis ? startX : startY;

@@ -30,6 +30,7 @@ import com.badlogic.gdx.physics.box2d.joints.DistanceJoint;
 import com.badlogic.gdx.physics.box2d.joints.FrictionJoint;
 import com.badlogic.gdx.physics.box2d.joints.GearJoint;
 import com.badlogic.gdx.physics.box2d.joints.GearJointDef;
+import com.badlogic.gdx.physics.box2d.joints.MotorJoint;
 import com.badlogic.gdx.physics.box2d.joints.MouseJoint;
 import com.badlogic.gdx.physics.box2d.joints.PrismaticJoint;
 import com.badlogic.gdx.physics.box2d.joints.PulleyJoint;
@@ -150,14 +151,17 @@ public final class World implements Disposable {
 	 * @warning This automatically deletes all associated shapes and joints.
 	 * @warning This function is locked during callbacks. */
 	public void destroyBody (Body body) {
+		JointEdge jointEdge = body.body.getJointList();
+		while (jointEdge != null) {
+			JointEdge next = jointEdge.next;			
+			world.destroyJoint(jointEdge.joint);
+			joints.remove(jointEdge.joint);
+			jointEdge = next;
+		}
 		world.destroyBody(body.body);
 		bodies.remove(body.body);
 		for (Fixture fixture : body.fixtures) {
 			fixtures.remove(fixture.fixture);
-		}
-		JointEdge jointEdge = body.body.getJointList();
-		while (jointEdge != null) {
-			joints.remove(jointEdge.joint);
 		}
 	}
 
@@ -171,6 +175,7 @@ public final class World implements Disposable {
 		if (def.type == JointType.DistanceJoint) joint = new DistanceJoint(this, (org.jbox2d.dynamics.joints.DistanceJoint)j);
 		if (def.type == JointType.FrictionJoint) joint = new FrictionJoint(this, (org.jbox2d.dynamics.joints.FrictionJoint)j);
 		if (def.type == JointType.GearJoint) joint = new GearJoint(this, (org.jbox2d.dynamics.joints.GearJoint)j, ((GearJointDef) def).joint1, ((GearJointDef) def).joint2);
+		if (def.type == JointType.MotorJoint) joint = new MotorJoint(this, (org.jbox2d.dynamics.joints.MotorJoint)j);
 		if (def.type == JointType.MouseJoint) joint = new MouseJoint(this, (org.jbox2d.dynamics.joints.MouseJoint)j);
 		if (def.type == JointType.PrismaticJoint) joint = new PrismaticJoint(this, (org.jbox2d.dynamics.joints.PrismaticJoint)j);
 		if (def.type == JointType.PulleyJoint) joint = new PulleyJoint(this, (org.jbox2d.dynamics.joints.PulleyJoint)j);
@@ -344,12 +349,16 @@ public final class World implements Disposable {
 	Vector2 normal = new Vector2();
 
 	public void rayCast (final RayCastCallback callback, Vector2 point1, Vector2 point2) {
+		rayCast(callback, point1.x, point1.y, point2.x, point2.y);
+	}
+
+	public void rayCast (final RayCastCallback callback, float point1X, float point1Y, float point2X, float point2Y) {
 		// FIXME pool RayCastCallback?
 		world.raycast(new org.jbox2d.callbacks.RayCastCallback() {
 			@Override
 			public float reportFixture (org.jbox2d.dynamics.Fixture f, Vec2 p, Vec2 n, float fraction) {
 				return callback.reportRayFixture(fixtures.get(f), point.set(p.x, p.y), normal.set(n.x, n.y), fraction);
 			}
-		}, this.point1.set(point1.x, point1.y), this.point2.set(point2.x, point2.y));
+		}, this.point1.set(point1X, point1Y), this.point2.set(point2X, point2Y));
 	}
 }
